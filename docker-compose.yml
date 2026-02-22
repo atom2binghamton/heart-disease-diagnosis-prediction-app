@@ -4,7 +4,7 @@ services:
     build:
       context: ./api
       dockerfile: Dockerfile
-    container_name: housing-api
+    container_name: heart-api
     # Use 'expose' instead of 'ports' to keep it internal only
     expose:
       - "8000"
@@ -14,14 +14,14 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     networks:
-      - housing-network
+      - heart-network
     restart: unless-stopped
 
   streamlit:
     build:
       context: ./streamlit
       dockerfile: Dockerfile
-    container_name: housing-streamlit
+    container_name: heart-streamlit
     # Only the Streamlit app is publicly accessible
     ports:
       - "8501:8501"
@@ -32,12 +32,12 @@ services:
       - API_URL=http://api:8000
       - PYTHONUNBUFFERED=1
     networks:
-      - housing-network
+      - heart-network
     depends_on:
       api:
         condition: service_healthy
     restart: unless-stopped
 
 networks:
-  housing-network:
+  heart-network:
     driver: bridge

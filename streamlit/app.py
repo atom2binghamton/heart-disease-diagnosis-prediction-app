@@ -9,14 +9,14 @@ import streamlit as st
 # -----------------------------------------------------------------------------
 # MUST be the first Streamlit command
 # -----------------------------------------------------------------------------
-st.set_page_config(page_title="Housing Prediction", page_icon="🏠", layout="centered")
+st.set_page_config(page_title="Heart Disease Diagnosis", page_icon="❤️", layout="centered")
 
 # -----------------------------------------------------------------------------
 # Config
 # -----------------------------------------------------------------------------
-SCHEMA_PATH = Path("/app/data/data_schema.json")
+SCHEMA_PATH = Path("data/data_schema.json")
 
-# API_URL is set in docker-compose environment
+# API_URL is set in docker-compose environment or local default
 API_BASE_URL = os.getenv("API_URL", "http://localhost:8000")
 PREDICT_ENDPOINT = f"{API_BASE_URL}/predict"
 
@@ -39,12 +39,12 @@ categorical_features = schema.get("categorical", {})
 # -----------------------------------------------------------------------------
 # Streamlit UI
 # -----------------------------------------------------------------------------
-st.title("🏠 Housing Prediction App")
+st.title("❤️ Heart Disease Prediction App")
 st.write(
-    f"This app sends your inputs to the FastAPI backend at **{API_BASE_URL}** for prediction."
+    f"This app sends clinical data to the FastAPI backend at **{API_BASE_URL}** for diagnostic inference."
 )
 
-st.header("Input Features")
+st.header("Clinical Features")
 
 user_input: Dict[str, Any] = {}
 
@@ -53,8 +53,8 @@ user_input: Dict[str, Any] = {}
 # -----------------------------------------------------------------------------
 st.subheader("Numerical Features")
 
-# Decide which features use sliders
-SLIDER_FEATURES = {"longitude", "latitude", "housing_median_age", "median_income"}
+# Decide which heart features use sliders for better UX
+SLIDER_FEATURES = {"age", "trestbps", "chol", "thalach", "oldpeak", "ca"}
 
 for feature_name, stats in numerical_features.items():
     min_val = float(stats.get("min", 0.0))
@@ -72,14 +72,11 @@ for feature_name, stats in numerical_features.items():
     )
 
     if feature_name in SLIDER_FEATURES:
-        # Determine step size based on range and semantics
-        if feature_name in {"housing_median_age"}:
-            step = 1.0  # age in years, int-like
-        elif feature_name in {"median_income"}:
-            step = 0.1  # more granular
+        # Determine step size based on features
+        if feature_name in {"age", "trestbps", "chol", "thalach", "ca"}:
+            step = 1.0  # Discrete clinical values
         else:
-            # generic heuristic for latitude/longitude
-            step = 0.01
+            step = 0.1  # Fractional values like oldpeak
 
         user_input[feature_name] = st.slider(
             label,
@@ -91,18 +88,8 @@ for feature_name, stats in numerical_features.items():
             key=feature_name,
         )
     else:
-        # Fallback to number_input for wide-range features
-        range_val = max_val - min_val
-        if range_val > 10000:
-            step = 10.0
-        elif range_val > 1000:
-            step = 5.0
-        elif range_val > 100:
-            step = 1.0
-        elif range_val > 10:
-            step = 0.1
-        else:
-            step = 0.01
+        # Fallback to number_input
+        step = 1.0 if (max_val - min_val) > 10 else 0.1
 
         user_input[feature_name] = st.number_input(
             label,
@@ -113,6 +100,7 @@ for feature_name, stats in numerical_features.items():
             help=help_text,
             key=feature_name,
         )
+
 # -----------------------------------------------------------------------------
 # Categorical Features
 # -----------------------------------------------------------------------------
@@ -125,7 +113,7 @@ for feature_name, info in categorical_features.items():
     if not unique_values:
         continue
 
-    # Default to the most common value
+    # Default to the most common value (Mode)
     if value_counts:
         default_value = max(value_counts, key=value_counts.get)
     else:
@@ -143,7 +131,7 @@ for feature_name, info in categorical_features.items():
         options=unique_values,
         index=default_idx,
         key=feature_name,
-        help=f"Distribution: {value_counts}",
+        help=f"Training Distribution: {value_counts}",
     )
 
 st.markdown("---")
@@ -151,10 +139,12 @@ st.markdown("---")
 # -----------------------------------------------------------------------------
 # Predict Button
 # -----------------------------------------------------------------------------
-if st.button("🔮 Predict", type="primary"):
+if st.button("🔮 Run Diagnosis", type="primary"):
+    # Note: We include a dummy patient_id as the API/Pipeline expects it
+    user_input["patient_id"] = "WEB-UI-USER"
     payload = {"instances": [user_input]}
 
-    with st.spinner("Calling API for prediction..."):
+    with st.spinner("Analyzing clinical data..."):
         try:
             resp = requests.post(PREDICT_ENDPOINT, json=payload, timeout=30)
         except requests.exceptions.RequestException as e:
@@ -165,23 +155,28 @@ if st.button("🔮 Predict", type="primary"):
             else:
                 data = resp.json()
                 preds = data.get("predictions", [])
+                probs = data.get("probabilities", [])
 
                 if not preds:
                     st.warning("⚠️ No predictions returned from API.")
                 else:
                     pred = preds[0]
-                    st.success("✅ Prediction successful!")
+                    prob = probs[0] if probs else None
+                    st.success("✅ Analysis Complete!")
 
                     st.subheader("Prediction Result")
 
-                    # Display prediction with nice formatting
-                    if isinstance(pred, (int, float)):
-                        st.metric(label="Predicted Value", value=f"{pred:,.2f}")
+                    # Logic to display Heart Disease Class and Probability
+                    if pred == 1:
+                        st.error(f"**Result: POSITIVE**")
                     else:
-                        st.metric(label="Predicted Class", value=str(pred))
+                        st.info(f"**Result: NEGATIVE**")
 
+                    if prob is not None:
+                        st.metric(label="Risk Confidence", value=f"{prob}%")
+                    
                     # Show input summary in expander
-                    with st.expander("📋 View Input Summary"):
+                    with st.expander("📋 View Submitted Clinical Data"):
                         st.json(user_input)
 
 st.markdown("---")

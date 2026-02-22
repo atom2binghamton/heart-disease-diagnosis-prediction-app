@@ -1,7 +1,7 @@
 # api/app.py
 """
-FastAPI service for housing price prediction.
-Loads the trained model and exposes a /predict endpoint.
+FastAPI service for heart disease diagnosis prediction.
+Loads the verified heart_pipeline and exposes a /predict endpoint.
 """
 
 from pathlib import Path
@@ -12,11 +12,9 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-# Import shared pipeline components so unpickling works
-from housing_pipeline import (
-    ClusterSimilarity,
-    column_ratio,
-    ratio_name,
+# Import shared heart pipeline components so unpickling works
+from heart_pipeline import (
+    ColumnDropper,
     build_preprocessing,
     make_estimator_for_name,
 )
@@ -24,11 +22,11 @@ from housing_pipeline import (
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-MODEL_PATH = Path("/app/models/global_best_model_optuna.pkl")
+MODEL_PATH = Path("models/global_best_heart_optuna.pkl")
 
 app = FastAPI(
-    title="Housing Price Prediction API",
-    description="FastAPI service for predicting California housing prices",
+    title="Heart Disease Prediction API",
+    description="FastAPI service for predicting heart disease risk",
     version="1.0.0",
 )
 
@@ -72,15 +70,12 @@ class PredictRequest(BaseModel):
             "example": {
                 "instances": [
                     {
-                        "longitude": -122.23,
-                        "latitude": 37.88,
-                        "housing_median_age": 41.0,
-                        "total_rooms": 880.0,
-                        "total_bedrooms": 129.0,
-                        "population": 322.0,
-                        "households": 126.0,
-                        "median_income": 8.3252,
-                        "ocean_proximity": "NEAR BAY",
+                        "patient_id": "PT-4452",
+                        "ca": 0,
+                        "cp_id": 2,
+                        "thal_id": 1,
+                        "age": 52,
+                        "sex": 1
                     }
                 ]
             }
@@ -88,13 +83,15 @@ class PredictRequest(BaseModel):
 
 
 class PredictResponse(BaseModel):
-    predictions: List[float]
+    predictions: List[int]
+    probabilities: List[float]
     count: int
 
     class Config:
         schema_extra = {
             "example": {
-                "predictions": [452600.0],
+                "predictions": [1],
+                "probabilities": [88.5],
                 "count": 1,
             }
         }
@@ -106,7 +103,7 @@ class PredictResponse(BaseModel):
 @app.get("/")
 def root():
     return {
-        "name": "Housing Price Prediction API",
+        "name": "Heart Disease Prediction API",
         "version": "1.0.0",
         "endpoints": {
             "health": "/health",
@@ -141,17 +138,9 @@ def predict(request: PredictRequest):
             detail=f"Invalid input format. Could not convert to DataFrame: {e}",
         )
 
-    required_columns = [
-        "longitude",
-        "latitude",
-        "housing_median_age",
-        "total_rooms",
-        "total_bedrooms",
-        "population",
-        "households",
-        "median_income",
-        "ocean_proximity",
-    ]
+    # Required columns based on your simplified heart_pipeline
+    required_columns = ["ca", "cp_id", "thal_id"]
+    
     missing = set(required_columns) - set(X.columns)
     if missing:
         raise HTTPException(
@@ -161,21 +150,28 @@ def predict(request: PredictRequest):
 
     try:
         preds = model.predict(X)
+        # Using predict_proba to provide the confidence percentage we discussed
+        probs = model.predict_proba(X)[:, 1] 
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Model prediction failed: {e}",
         )
 
-    preds_list = [float(p) for p in preds]
+    preds_list = [int(p) for p in preds]
+    probs_list = [round(float(p) * 100, 2) for p in probs]
 
-    return PredictResponse(predictions=preds_list, count=len(preds_list))
+    return PredictResponse(
+        predictions=preds_list, 
+        probabilities=probs_list, 
+        count=len(preds_list)
+    )
 
 
 @app.on_event("startup")
 async def startup_event():
     print("\n" + "=" * 80)
-    print("Housing Price Prediction API - Starting Up")
+    print("Heart Disease Prediction API - Starting Up")
     print("=" * 80)
     print(f"Model path: {MODEL_PATH}")
     print(f"Model loaded: {model is not None}")
